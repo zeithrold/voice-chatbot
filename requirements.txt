@@ -1,0 +1,7 @@
+gradio
+jupyter
+requests
+websocket-client
+zhipuai
+loguru
+numpy
