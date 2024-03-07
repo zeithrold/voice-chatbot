@@ -6,3 +6,4 @@ zhipuai
 loguru
 numpy
 scipy
+ffmpy
