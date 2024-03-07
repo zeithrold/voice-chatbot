@@ -7,6 +7,7 @@ import base64
 import numpy as np
 import json
 import websockets.client
+from loguru import logger
 from websockets.exceptions import ConnectionClosedError
 import time
 
@@ -52,29 +53,35 @@ class IATClient:
         path = parse_result.path
 
         sign_raw_str = f"host: {host}\ndate: {date}\nGET {path} HTTP/1.1"
+        logger.debug(f"Sign raw string: {sign_raw_str}")
         sign_sha = hmac.new(
             self.api_secret.encode("utf-8"),
             sign_raw_str.encode("utf-8"),
             digestmod=hashlib.sha256,
         ).digest()
-        auth_origin = 'api_key="%s", algorithm="%s", headers="%s", signature="%s"' % (
+        sign_sha = base64.b64encode(sign_sha).decode("utf-8")
+        auth_raw_str = 'api_key="%s", algorithm="%s", headers="%s", signature="%s"' % (
             self.api_key,
             "hmac-sha256",
             "host date request-line",
             sign_sha,
         )
-        auth = base64.b64encode(auth_origin.encode("utf-8")).decode("utf-8")
+        logger.debug(f"Authorization: {auth_raw_str}")
+        auth = base64.b64encode(auth_raw_str.encode("utf-8")).decode("utf-8")
         params = {
             "authorization": auth,
             "date": date,
             "host": host,
         }
         url = f"{self.endpoint}?{urlencode(params)}"
+        logger.debug(f"URL: {url}")
         return url
 
     def prepare_data(self, audio: bytes, chunk_size=1280, sampling_rate=16000):
         status = STATUS_FIRST_FRAME
+        logger.debug(f"Total audio length: {len(audio)}")
         for i in range(0, len(audio), chunk_size):
+            logger.debug(f"Processing chunk {i} to {i + chunk_size}")
             chunk = audio[i : i + chunk_size]
             if i + chunk_size >= len(audio):
                 status = STATUS_LAST_FRAME
@@ -91,16 +98,29 @@ class IATClient:
             yield payload
             status = STATUS_CONTINUE_FRAME
 
-    async def dictate(self, audio: tuple[int, np.ndarray], interval=0.4):
+    async def dictate(self, audio: tuple[int, np.ndarray], interval=0.04):
+        logger.debug(f"Generate URL")
         url = self.create_url()
+        logger.debug("Encoding audio to PCM")
         sampling_rate, source = audio
         pcm = self.encode_pcm(source)
         async with websockets.client.connect(url) as ws:
             for payload in self.prepare_data(pcm, sampling_rate=sampling_rate):
+                logger.debug('Sending payload')
                 await ws.send(json.dumps(payload))
                 time.sleep(interval)
             try:
                 async for message in ws:
-                    yield message
+                    data: dict = json.loads(message)
+                    logger.debug(f"Received data: {data}")
+                    if not 'data' in data.keys():
+                        yield ''
+                        break
+                    is_end = data["data"]["status"] == STATUS_LAST_FRAME
+                    ws_list = data["data"]["result"]["ws"]
+                    text = ''.join([cw["w"] for cw in sum([ws["cw"] for ws in ws_list], [])])
+                    yield text
+                    if is_end:
+                        break
             except ConnectionClosedError as e:
                 print(f"Connection closed: {e.code} {e.reason}")

@@ -1,7 +1,8 @@
 gradio
 jupyter
 requests
-websocket-client
+websockets
 zhipuai
 loguru
 numpy
+scipy
