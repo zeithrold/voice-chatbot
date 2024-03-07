@@ -85,8 +85,6 @@ async def generate_audio(history: list[list[str]]):
     return result
 
 with gr.Blocks() as demo:
-    title = gr.Markdown("# 老王元宇宙受害者")
-
     chatbot = gr.Chatbot(
         [],
         elem_id="chatbot",
